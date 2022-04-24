@@ -5,7 +5,7 @@
   "author": "Auryn Engel <auryn.engel@sap.com>",
   "license": "MIT",
   "scripts": {
-    "live": "elm-live src/Main.elm --proxy-prefix=/api --proxy-host=http://localhost:8080/api --open --start-page=resources/index.html -- --output=main.js --debug",
+    "live": "elm-live src/Main.elm --proxy-prefix=/api --proxy-host=http://localhost:8080/api --open --start-page=resources/index.html -- --output=main.js",
     "build": "elm make src/Main.elm --optimize --output docs/main.js && cp -R resources/ docs/",
     "optimize": "yarn build && ./optimize.sh src/Main.elm"
   },

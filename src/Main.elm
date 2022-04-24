@@ -3,13 +3,14 @@ module Main exposing (..)
 import Browser
 import Browser.Events exposing (onKeyPress)
 import Html exposing (..)
-import Html.Attributes exposing (style, type_, value)
-import Html.Events exposing (onInput)
+import Html.Attributes exposing (default, placeholder, style, type_, value)
+import Html.Events exposing (onClick, onInput)
 import Html.Keyed as Keyed
 import Html.Lazy exposing (lazy)
 import Http
 import Json.Decode
 import Json.Decode.Pipeline
+import Set
 
 
 
@@ -35,14 +36,18 @@ main =
 
 
 type alias Model =
-    { city : Maybe String
+    { title : Maybe String
+    , city : Maybe String
+    , studio_type : Maybe String
     , studios : Maybe (List Studio)
+    , studio_types : Maybe (List String)
+    , list_amount : Int
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Model Nothing Nothing
+    ( Model Nothing Nothing Nothing Nothing Nothing 100
     , getStudios
     )
 
@@ -52,24 +57,42 @@ init _ =
 
 
 type Msg
-    = SearchCity String
+    = FilterCity String
+    | FilterType String
+    | FilterTitle String
     | GetStudios
     | ShowStudios (Result Http.Error (List Studio))
+    | SetListAmount String
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        SearchCity city ->
+        FilterCity city ->
             ( { model | city = Just city }, Cmd.none )
 
+        FilterType type_ ->
+            ( { model | studio_type = Just type_ }, Cmd.none )
+
+        FilterTitle title ->
+            ( { model | title = Just title }, Cmd.none )
+
         GetStudios ->
-            ( model, Cmd.none )
+            ( model, getStudios )
+
+        SetListAmount amount ->
+            ( { model | list_amount = Maybe.withDefault 100 (String.toInt amount) }, Cmd.none )
 
         ShowStudios result ->
             case result of
                 Ok studios ->
-                    ( { model | studios = Just studios }, Cmd.none )
+                    ( { model
+                        | studios = Just studios
+                        , studio_types =
+                            Just (List.map (\studio -> studio.studio_type) studios |> Set.fromList |> Set.toList)
+                      }
+                    , Cmd.none
+                    )
 
                 Err _ ->
                     ( { model | studios = Nothing }, Cmd.none )
@@ -93,11 +116,20 @@ view model =
     div bodyStyle
         [ h1 [] [ text "Qualitrain Studios" ]
         , label []
-            [ text "City"
-            , input [ onInput SearchCity ] []
+            [ text "Title"
+            , input [ onInput FilterTitle, type_ "search" ] []
             ]
-        , p [] [ text ("City search for: " ++ Maybe.withDefault "-" model.city) ]
-        , showStudios model.studios model.city
+        , label []
+            [ text "City"
+            , input [ onInput FilterCity, type_ "search" ] []
+            ]
+        , showTypeSelect model.studio_types
+        , label []
+            [ text "Show First"
+            , input [ type_ "number", onInput SetListAmount, value (String.fromInt model.list_amount) ] []
+            ]
+        , showStudios model
+        , button [ onClick (SetListAmount (String.fromInt (model.list_amount + 100))) ] [ text "ADD 100" ]
         ]
 
 
@@ -107,34 +139,80 @@ bodyStyle =
     ]
 
 
-showStudios : Maybe (List Studio) -> Maybe String -> Html msg
-showStudios maybe_studios maybe_city =
-    case maybe_studios of
+showTypeSelect : Maybe (List String) -> Html Msg
+showTypeSelect maybe_studio_types =
+    case maybe_studio_types of
+        Nothing ->
+            label [] [ text "Type", select [] [] ]
+
+        Just studio_types ->
+            label []
+                [ text "Type"
+                , select [ onInput FilterType ]
+                    (List.map
+                        (\studio_type -> option [] [ text studio_type ])
+                        studio_types
+                        |> List.append
+                            [ option
+                                []
+                                [ text "ALL" ]
+                            ]
+                    )
+                ]
+
+
+showStudios : Model -> Html msg
+showStudios model =
+    case model.studios of
         Nothing ->
             div [] [ text "No Studios found" ]
 
         Just studios ->
-            case maybe_city of
-                Nothing ->
-                    div []
-                        [ h1 [] [ text ("All " ++ String.fromInt (List.length studios) ++ " Studios:") ]
-                        , Keyed.node "ol" [] (List.map showKeyedStudio studios)
-                        ]
-
-                Just city ->
-                    let
-                        filtered_studios =
-                            filterStudiosOnCity studios city
-                    in
-                    div []
-                        [ h1 [] [ text ("Found " ++ String.fromInt (List.length filtered_studios) ++ " Studios:") ]
-                        , Keyed.node "ol" [] (List.map showKeyedStudio filtered_studios)
-                        ]
+            let
+                filtered_studios =
+                    studios
+                        |> filterStudiosOnCity model.city
+                        |> filterStudiosOnType model.studio_type
+                        |> filterStudiosOnTitle model.title
+            in
+            div []
+                [ h4 [] [ text ("Show the first " ++ String.fromInt model.list_amount ++ " from " ++ String.fromInt (List.length filtered_studios)) ]
+                , Keyed.node "ol" [] (List.map showKeyedStudio (List.take model.list_amount filtered_studios))
+                ]
 
 
-filterStudiosOnCity : List Studio -> String -> List Studio
-filterStudiosOnCity studios city =
-    List.filter (\studio -> String.contains (String.toLower city) (String.toLower studio.city)) studios
+filterStudiosOnType : Maybe String -> List Studio -> List Studio
+filterStudiosOnType maybe_type studios =
+    case maybe_type of
+        Nothing ->
+            studios
+
+        Just type_ ->
+            if type_ == "ALL" then
+                studios
+
+            else
+                List.filter (\studio -> String.contains (String.toLower type_) (String.toLower studio.studio_type)) studios
+
+
+filterStudiosOnCity : Maybe String -> List Studio -> List Studio
+filterStudiosOnCity maybe_city studios =
+    case maybe_city of
+        Nothing ->
+            studios
+
+        Just city ->
+            List.filter (\studio -> String.contains (String.toLower city) (String.toLower studio.city)) studios
+
+
+filterStudiosOnTitle : Maybe String -> List Studio -> List Studio
+filterStudiosOnTitle maybe_title studios =
+    case maybe_title of
+        Nothing ->
+            studios
+
+        Just title ->
+            List.filter (\studio -> String.contains (String.toLower title) (String.toLower studio.title)) studios
 
 
 showKeyedStudio : Studio -> ( String, Html msg )
@@ -149,11 +227,38 @@ showStudio studio =
     li []
         [ details []
             [ summary []
-                [ text studio.title
+                [ text (emojiForType studio.studio_type ++ " " ++ studio.title)
                 ]
-            , p [] [ text studio.city ]
+            , p [] [ b [] [ text "Type: " ], text studio.studio_type ]
+            , p [] [ b [] [ text "City: " ], text studio.city ]
+            , p [] [ b [] [ text "Adress: " ], text studio.address ]
             ]
         ]
+
+
+emojiForType : String -> String
+emojiForType studio_type =
+    case studio_type of
+        "GYM" ->
+            "💪"
+
+        "SWIMMING_POOL" ->
+            "🏊\u{200D}♀️"
+
+        "PHYSIO" ->
+            "👩\u{200D}⚕️"
+
+        "BOULDER_HALL" ->
+            "🧗\u{200D}♀️"
+
+        "CROSSFIT" ->
+            "☠️"
+
+        "YOGA_STUDIO" ->
+            "🧘\u{200D}♀️"
+
+        default ->
+            "𖡄"
 
 
 getStudios : Cmd Msg
