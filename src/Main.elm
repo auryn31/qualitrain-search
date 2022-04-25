@@ -1,9 +1,8 @@
 module Main exposing (..)
 
 import Browser
-import Browser.Events exposing (onKeyPress)
 import Html exposing (..)
-import Html.Attributes exposing (default, placeholder, style, type_, value)
+import Html.Attributes exposing (disabled, style, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Html.Keyed as Keyed
 import Html.Lazy exposing (lazy)
@@ -18,8 +17,8 @@ import Set
 -- MAIN
 
 
-studiosUrl =
-    "/resources/studios.json"
+type alias Flags =
+    { studios_url : String }
 
 
 main =
@@ -45,10 +44,10 @@ type alias Model =
     }
 
 
-init : () -> ( Model, Cmd Msg )
-init _ =
+init : Flags -> ( Model, Cmd Msg )
+init flags =
     ( Model Nothing Nothing Nothing Nothing Nothing 100
-    , getStudios
+    , getStudios flags.studios_url
     )
 
 
@@ -60,7 +59,6 @@ type Msg
     = FilterCity String
     | FilterType String
     | FilterTitle String
-    | GetStudios
     | ShowStudios (Result Http.Error (List Studio))
     | SetListAmount String
 
@@ -76,9 +74,6 @@ update msg model =
 
         FilterTitle title ->
             ( { model | title = Just title }, Cmd.none )
-
-        GetStudios ->
-            ( model, getStudios )
 
         SetListAmount amount ->
             ( { model | list_amount = Maybe.withDefault 100 (String.toInt amount) }, Cmd.none )
@@ -129,7 +124,6 @@ view model =
             , input [ type_ "number", onInput SetListAmount, value (String.fromInt model.list_amount) ] []
             ]
         , showStudios model
-        , button [ onClick (SetListAmount (String.fromInt (model.list_amount + 100))) ] [ text "ADD 100" ]
         ]
 
 
@@ -161,7 +155,7 @@ showTypeSelect maybe_studio_types =
                 ]
 
 
-showStudios : Model -> Html msg
+showStudios : Model -> Html Msg
 showStudios model =
     case model.studios of
         Nothing ->
@@ -178,7 +172,17 @@ showStudios model =
             div []
                 [ h4 [] [ text ("Show the first " ++ String.fromInt model.list_amount ++ " from " ++ String.fromInt (List.length filtered_studios)) ]
                 , Keyed.node "ol" [] (List.map showKeyedStudio (List.take model.list_amount filtered_studios))
+                , viewExpandButton model filtered_studios
                 ]
+
+
+viewExpandButton : Model -> List Studio -> Html Msg
+viewExpandButton model studios =
+    if model.list_amount <= List.length studios then
+        button [ onClick (SetListAmount (String.fromInt (model.list_amount + 100))) ] [ text "ADD 100" ]
+
+    else
+        button [ disabled True ] [ text "ADD 100" ]
 
 
 filterStudiosOnType : Maybe String -> List Studio -> List Studio
@@ -257,12 +261,12 @@ emojiForType studio_type =
         "YOGA_STUDIO" ->
             "🧘\u{200D}♀️"
 
-        default ->
+        _ ->
             "𖡄"
 
 
-getStudios : Cmd Msg
-getStudios =
+getStudios : String -> Cmd Msg
+getStudios studiosUrl =
     Http.get
         { url = studiosUrl
         , expect = Http.expectJson ShowStudios decodeStudio
